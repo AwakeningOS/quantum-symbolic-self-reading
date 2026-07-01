@@ -1,11 +1,18 @@
 import { BASIS, runFullMeasurement, validateConfig } from "./quantum.js";
-import { encodingPrompt, interpretationPrompt } from "./prompts.js";
+import { getEncoderPrompt, interpretationPrompt } from "./prompts.js";
 
 const input = document.querySelector("#config-input");
 const errorBox = document.querySelector("#error-message");
 const resultSection = document.querySelector("#results");
 const output = document.querySelector("#result-content");
 let latest = null;
+let selectedMode = "general";
+
+const MODE_LABELS = {
+  general: "一般ヴァージョン",
+  seeker: "スピリチュアル・神秘主義・求道者ヴァージョン",
+  legacy: "旧形式（mode_profile 未指定）",
+};
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -45,6 +52,19 @@ function card(title) {
   const section = element("section", "result-card");
   section.append(element("h3", null, title));
   return section;
+}
+
+function modeLabel(mode) {
+  return MODE_LABELS[mode] ?? `不明なモード (${mode})`;
+}
+
+function updateModeUi(mode) {
+  selectedMode = mode === "seeker" ? "seeker" : "general";
+  const prompt = getEncoderPrompt(selectedMode);
+  document.querySelector("#encoding-prompt").textContent = prompt;
+  document.querySelector("#encoder-copy-button").textContent = `${modeLabel(selectedMode)}のAI変換プロンプトをコピー`;
+  const radio = document.querySelector(`input[name="mode-profile"][value="${selectedMode}"]`);
+  if (radio) radio.checked = true;
 }
 
 function simpleTable(headers, rows) {
@@ -92,6 +112,7 @@ function renderResults(measurement) {
     ["name", result.name],
     ["description", result.description],
     ["mode", result.mode],
+    ["mode_profile", `${result.mode_profile} / ${modeLabel(result.mode_profile)}`],
     ["initial", result.initial],
     ["expected ranking", result.expected_ranking.join(" > ") || "未指定"],
     ["observed ranking / probabilities", result.observed_ranking_from_probabilities.join(" > ")],
@@ -211,8 +232,12 @@ function downloadJson(data, filename) {
   URL.revokeObjectURL(url);
 }
 
-document.querySelector("#encoding-prompt").textContent = encodingPrompt;
+updateModeUi("general");
 document.querySelector("#interpretation-prompt").textContent = interpretationPrompt;
+
+document.querySelectorAll('input[name="mode-profile"]').forEach((radio) => {
+  radio.addEventListener("change", (event) => updateModeUi(event.currentTarget.value));
+});
 
 document.querySelector("#measure-button").addEventListener("click", () => {
   clearError();
@@ -226,18 +251,22 @@ document.querySelector("#measure-button").addEventListener("click", () => {
   }
 });
 
-document.querySelector("#sample-button").addEventListener("click", async () => {
+async function loadSample(path, mode) {
   clearError();
   try {
-    const response = await fetch("./examples/user_spiritual_evolution_light_descent_v0.json");
+    const response = await fetch(path);
     if (!response.ok) throw new Error(`サンプルJSONを読み込めませんでした（HTTP ${response.status}）。`);
     const sample = await response.json();
     input.value = JSON.stringify(sample, null, 2);
+    updateModeUi(mode);
     input.focus();
   } catch (error) {
     showError(error);
   }
-});
+}
+
+document.querySelector("#general-sample-button").addEventListener("click", () => loadSample("./examples/midlife_reboot_general_v0.json", "general"));
+document.querySelector("#seeker-sample-button").addEventListener("click", () => loadSample("./examples/user_spiritual_evolution_light_descent_v0.json", "seeker"));
 
 document.querySelector("#clear-button").addEventListener("click", () => {
   input.value = "";
@@ -248,7 +277,7 @@ document.querySelector("#clear-button").addEventListener("click", () => {
 });
 
 document.querySelectorAll("[data-copy-prompt]").forEach((button) => {
-  button.addEventListener("click", () => copyText(button.dataset.copyPrompt === "encoding" ? encodingPrompt : interpretationPrompt, button));
+  button.addEventListener("click", () => copyText(button.dataset.copyPrompt === "encoding" ? getEncoderPrompt(selectedMode) : interpretationPrompt, button));
 });
 
 document.querySelector("#copy-result").addEventListener("click", (event) => latest && copyText(JSON.stringify(latest.result, null, 2), event.currentTarget));

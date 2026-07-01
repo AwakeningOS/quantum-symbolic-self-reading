@@ -9,13 +9,24 @@ import {
   runFullMeasurement,
   validateConfig,
 } from "../src/quantum.js";
-import { encodingPrompt, interpretationPrompt } from "../src/prompts.js";
+import {
+  GENERAL_ENCODER_PROMPT,
+  SEEKER_ENCODER_PROMPT,
+  encodingPrompt,
+  getEncoderPrompt,
+  interpretationPrompt,
+} from "../src/prompts.js";
 
 const sampleUrl = new URL("../examples/user_spiritual_evolution_light_descent_v0.json", import.meta.url);
 const config = JSON.parse(await readFile(sampleUrl, "utf8"));
+const generalSampleUrl = new URL("../examples/midlife_reboot_general_v0.json", import.meta.url);
+const generalConfig = JSON.parse(await readFile(generalSampleUrl, "utf8"));
 
 assert.equal(config.name, "user_spiritual_evolution_light_descent_v0", "1. サンプルJSONを読み込める");
 assert.equal(validateConfig(config), true, "2. validateConfig が通る");
+assert.equal(generalConfig.name, "midlife_reboot_general_v0", "一般版サンプルJSONを読み込める");
+assert.equal(generalConfig.mode_profile, "general", "一般版サンプルは mode_profile=general");
+assert.equal(validateConfig(generalConfig), true, "一般版サンプルが validateConfig を通る");
 
 const { result, audit, aiInterpretation } = runFullMeasurement(config);
 const norm = Object.values(result.final_statevector).reduce((sum, z) => sum + abs2(z), 0);
@@ -66,12 +77,32 @@ assert.match(encodingPrompt, /expected_reading は「予想」または「仮説
 assert.match(interpretationPrompt, /これは測定前の config JSON です。実測確率が含まれていないため/, "config JSONだけを結果解釈しない");
 assert.match(interpretationPrompt, /絶対に数値を推測・補完・創作しない/, "数値創作を禁止");
 
+assert.equal(getEncoderPrompt("general"), GENERAL_ENCODER_PROMPT, "20. general prompt が存在する");
+assert.equal(getEncoderPrompt("seeker"), SEEKER_ENCODER_PROMPT, "21. seeker prompt が存在する");
+for (const term of ["内的核", "現実相", "背後秩序", "顕在作用"]) {
+  assert.match(GENERAL_ENCODER_PROMPT, new RegExp(term), `general prompt に ${term} がある`);
+}
+for (const term of ["魂的個我", "非顕現の神", "顕現した神性"]) {
+  assert.match(SEEKER_ENCODER_PROMPT, new RegExp(term), `seeker prompt に ${term} がある`);
+}
+assert.match(GENERAL_ENCODER_PROMPT, /"mode_profile": "general"/, "general prompt は mode_profile を出力する");
+assert.match(SEEKER_ENCODER_PROMPT, /"mode_profile": "seeker"/, "seeker prompt は mode_profile を出力する");
+assert.equal(encodingPrompt, SEEKER_ENCODER_PROMPT, "旧 encodingPrompt export は求道者版として互換維持");
+assert.match(interpretationPrompt, /mode_profile = general/, "解釈プロンプトは general profile を扱う");
+assert.match(interpretationPrompt, /component_meanings を優先/, "解釈は component_meanings を優先する");
+
+const generalMeasurement = runFullMeasurement(generalConfig);
+assert.equal(generalMeasurement.result.mode_profile, "general", "22. result に general mode_profile を引き継ぐ");
+assert.equal(generalMeasurement.aiInterpretation.mode_profile, "general", "23. AI JSON に general mode_profile を引き継ぐ");
+assert.equal(result.mode_profile, "seeker", "既存求道者サンプルは seeker として動く");
+assert.equal(aiInterpretation.mode_profile, "seeker", "求道者AI JSONは seeker を引き継ぐ");
 const tieConfig = {
   initial: "a",
   shots: 1,
   seed: 1,
   gates: [{ name: "tie", source: "a", target: "b", theta: Math.PI / 4, phi: 0, strength: 2.5 }],
 };
+assert.equal(runFullMeasurement(tieConfig).result.mode_profile, "legacy", "mode_profile 未指定は seeker と推測せず legacy");
 assert.deepEqual(runFullMeasurement(tieConfig).result.observed_ranking, ["a", "b", "c", "d"], "同率は basis 順で安定ソート");
 assert.equal(initialState("d")[3].re, 1, "単一初期状態を生成できる");
 
@@ -80,15 +111,25 @@ assert.throws(() => validateConfig({ initial: "a", gates: [] }), /gates が空/,
 
 console.log("All tests passed.");
 console.log(JSON.stringify({
-  name: result.name,
-  probabilities: result.probabilities,
-  sampled_counts: result.sampled_counts,
-  sampled_probabilities: result.sampled_probabilities,
-  observed_ranking_from_probabilities: result.observed_ranking_from_probabilities,
-  observed_ranking_from_counts: result.observed_ranking_from_counts,
-  expected_ranking: result.expected_ranking,
-  ranking_match_expected_from_probabilities: result.ranking_match_expected_from_probabilities,
-  ranking_match_expected_from_counts: result.ranking_match_expected_from_counts,
-  ai_interpretation_schema: aiInterpretation.schema_version,
-  norm: result.norm,
+  general: {
+    name: generalMeasurement.result.name,
+    mode_profile: generalMeasurement.result.mode_profile,
+    probabilities: generalMeasurement.result.probabilities,
+    sampled_probabilities: generalMeasurement.result.sampled_probabilities,
+    observed_ranking: generalMeasurement.result.observed_ranking_from_probabilities,
+  },
+  seeker: {
+    name: result.name,
+    mode_profile: result.mode_profile,
+    probabilities: result.probabilities,
+    sampled_counts: result.sampled_counts,
+    sampled_probabilities: result.sampled_probabilities,
+    observed_ranking_from_probabilities: result.observed_ranking_from_probabilities,
+    observed_ranking_from_counts: result.observed_ranking_from_counts,
+    expected_ranking: result.expected_ranking,
+    ranking_match_expected_from_probabilities: result.ranking_match_expected_from_probabilities,
+    ranking_match_expected_from_counts: result.ranking_match_expected_from_counts,
+    ai_interpretation_schema: aiInterpretation.schema_version,
+    norm: result.norm,
+  },
 }, null, 2));
