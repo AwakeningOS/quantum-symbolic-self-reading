@@ -1,0 +1,242 @@
+import { BASIS, runFullMeasurement, validateConfig } from "./quantum.js";
+import { encodingPrompt, interpretationPrompt } from "./prompts.js";
+
+const input = document.querySelector("#config-input");
+const errorBox = document.querySelector("#error-message");
+const resultSection = document.querySelector("#results");
+const output = document.querySelector("#result-content");
+let latest = null;
+
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function formatNumber(value, digits = 6) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "undefined";
+  const rounded = Math.abs(value) < 0.5 * 10 ** -digits ? 0 : value;
+  return rounded.toFixed(digits);
+}
+
+function parseInput() {
+  const raw = input.value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  if (!raw) throw new Error("config JSON を入力してください。");
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`JSONの形式が正しくありません。${error.message}`);
+  }
+}
+
+function clearError() {
+  errorBox.hidden = true;
+  errorBox.textContent = "";
+}
+
+function showError(error) {
+  errorBox.textContent = error instanceof Error ? error.message : String(error);
+  errorBox.hidden = false;
+  errorBox.focus();
+}
+
+function card(title) {
+  const section = element("section", "result-card");
+  section.append(element("h3", null, title));
+  return section;
+}
+
+function simpleTable(headers, rows) {
+  const wrapper = element("div", "table-wrap");
+  const table = element("table");
+  const headRow = element("tr");
+  headers.forEach((header) => headRow.append(element("th", null, header)));
+  const head = element("thead");
+  head.append(headRow);
+  const body = element("tbody");
+  rows.forEach((row) => {
+    const tr = element("tr");
+    row.forEach((cell) => tr.append(element("td", null, String(cell))));
+    body.append(tr);
+  });
+  table.append(head, body);
+  wrapper.append(table);
+  return wrapper;
+}
+
+function distributionCard(result) {
+  const section = card("B. 確率分布");
+  const chart = element("div", "distribution");
+  BASIS.forEach((label) => {
+    const row = element("div", "bar-row");
+    row.append(element("strong", "bar-label", label));
+    const track = element("div", "bar-track");
+    const fill = element("div", `bar-fill bar-${label}`);
+    fill.style.width = `${Math.max(0, Math.min(100, result.probabilities[label] * 100))}%`;
+    track.append(fill);
+    row.append(track, element("span", "mono", formatNumber(result.probabilities[label], 8)));
+    chart.append(row);
+  });
+  section.append(chart);
+  return section;
+}
+
+function renderResults(measurement) {
+  const { result, audit } = measurement;
+  output.replaceChildren();
+
+  const basic = card("A. 基本情報");
+  basic.append(simpleTable(["項目", "値"], [
+    ["name", result.name],
+    ["description", result.description],
+    ["mode", result.mode],
+    ["initial", result.initial],
+    ["expected ranking", result.expected_ranking.join(" > ") || "未指定"],
+    ["observed ranking", result.observed_ranking.join(" > ")],
+    ["match / mismatch", result.expected_match === null ? "N/A" : result.expected_match ? "MATCH" : "MISMATCH"],
+  ]));
+  output.append(basic, distributionCard(result));
+
+  const counts = card("C. Counts");
+  counts.append(simpleTable(["shots", ...BASIS], [[
+    result.shots ?? "未指定",
+    ...BASIS.map((label) => result.counts?.[label] ?? "—"),
+  ]]));
+  output.append(counts);
+
+  const statevector = card("D. Final statevector");
+  statevector.append(simpleTable(["成分", "複素振幅"], BASIS.map((label) => {
+    const z = result.final_statevector[label];
+    return [label, `${formatNumber(z.re, 10)} ${z.im < 0 ? "−" : "+"} ${formatNumber(Math.abs(z.im), 10)} i`];
+  })));
+  output.append(statevector);
+
+  const phaseCard = card("E. Phases");
+  phaseCard.append(simpleTable(["成分", "radians", "degrees"], BASIS.map((label) => [
+    label, formatNumber(result.phases[label].radians), formatNumber(result.phases[label].degrees, 3),
+  ])));
+  output.append(phaseCard);
+
+  const relative = card("F. Relative phases");
+  relative.append(simpleTable(["組", "radians", "degrees"], Object.entries(result.relative_phases).map(([key, value]) => [
+    key, formatNumber(value.radians), formatNumber(value.degrees, 3),
+  ])));
+  output.append(relative);
+
+  const alignment = card("G. Alignment");
+  alignment.append(element("p", "formula", "alignment(i,j) = |amp_i| |amp_j| cos(phase_i − phase_j)"));
+  alignment.append(simpleTable(["組", "alignment"], Object.entries(result.alignment).map(([key, value]) => [key, formatNumber(value, 8)])));
+  output.append(alignment);
+
+  const trace = card("H. Gate trace");
+  trace.append(simpleTable(
+    ["step", "gate", ...BASIS.map((x) => `before ${x}`), ...BASIS.map((x) => `after ${x}`), ...BASIS.map((x) => `delta ${x}`)],
+    audit.gate_trace.map((item) => [
+      item.step, item.gate,
+      ...BASIS.map((label) => formatNumber(item.before[label], 4)),
+      ...BASIS.map((label) => formatNumber(item.after[label], 4)),
+      ...BASIS.map((label) => formatNumber(item.delta[label], 4)),
+    ]),
+  ));
+  output.append(trace);
+
+  const ablation = card("I. Ablation");
+  ablation.append(simpleTable(
+    ["removed gate", "primary", "secondary", ...BASIS, "L1 difference"],
+    audit.ablation.map((item) => [item.removed_gate, item.primary, item.secondary, ...BASIS.map((x) => formatNumber(item.probabilities[x], 4)), formatNumber(item.l1_difference, 4)]),
+  ));
+  output.append(ablation);
+
+  const order = card("J. Order sensitivity");
+  order.append(simpleTable(
+    ["swap steps", "gates", "primary", "secondary", "max probability delta", "sensitivity"],
+    audit.order_sensitivity.map((item) => [item.swap_steps.join(" ↔ "), item.swapped_gates.join(" / "), item.primary, item.secondary, formatNumber(item.max_probability_delta, 4), item.sensitivity]),
+  ));
+  output.append(order);
+
+  const phaseSensitivity = card("K. Phase sensitivity");
+  phaseSensitivity.append(simpleTable(
+    ["gate", "tested phi", "primary", "secondary", "max probability delta", "sensitivity"],
+    audit.phase_sensitivity.map((item) => [item.gate, formatNumber(item.tested_phi, 6), item.primary, item.secondary, formatNumber(item.max_probability_delta, 4), item.sensitivity]),
+  ));
+  output.append(phaseSensitivity);
+
+  const notice = element("div", "notice warning");
+  notice.append(element("strong", null, "注意書き"), element("p", null, "この結果は、霊的真実・医学的事実・人生の絶対診断を証明するものではありません。AIが作った象徴的な回路設定を、数学的に展開した結果です。自己理解・内省・物語の整理のために使ってください。医療・宗教・人生判断の絶対的根拠にはしないでください。"));
+  output.append(notice);
+  resultSection.hidden = false;
+  resultSection.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function copyText(text, button) {
+  try {
+    await navigator.clipboard.writeText(text);
+    const original = button.textContent;
+    button.textContent = "コピーしました";
+    setTimeout(() => { button.textContent = original; }, 1400);
+  } catch {
+    const helper = element("textarea");
+    helper.value = text;
+    document.body.append(helper);
+    helper.select();
+    document.execCommand("copy");
+    helper.remove();
+  }
+}
+
+function downloadJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = element("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+document.querySelector("#encoding-prompt").textContent = encodingPrompt;
+document.querySelector("#interpretation-prompt").textContent = interpretationPrompt;
+
+document.querySelector("#measure-button").addEventListener("click", () => {
+  clearError();
+  try {
+    const config = parseInput();
+    validateConfig(config);
+    latest = runFullMeasurement(config);
+    renderResults(latest);
+  } catch (error) {
+    showError(error);
+  }
+});
+
+document.querySelector("#sample-button").addEventListener("click", async () => {
+  clearError();
+  try {
+    const response = await fetch("./examples/user_spiritual_evolution_light_descent_v0.json");
+    if (!response.ok) throw new Error(`サンプルJSONを読み込めませんでした（HTTP ${response.status}）。`);
+    const sample = await response.json();
+    input.value = JSON.stringify(sample, null, 2);
+    input.focus();
+  } catch (error) {
+    showError(error);
+  }
+});
+
+document.querySelector("#clear-button").addEventListener("click", () => {
+  input.value = "";
+  latest = null;
+  resultSection.hidden = true;
+  clearError();
+  input.focus();
+});
+
+document.querySelectorAll("[data-copy-prompt]").forEach((button) => {
+  button.addEventListener("click", () => copyText(button.dataset.copyPrompt === "encoding" ? encodingPrompt : interpretationPrompt, button));
+});
+
+document.querySelector("#copy-result").addEventListener("click", (event) => latest && copyText(JSON.stringify(latest.result, null, 2), event.currentTarget));
+document.querySelector("#copy-audit").addEventListener("click", (event) => latest && copyText(JSON.stringify(latest.audit, null, 2), event.currentTarget));
+document.querySelector("#copy-prompt-audit").addEventListener("click", (event) => latest && copyText(`${interpretationPrompt.replace("【ここにサイトで出た result JSON または audit JSON を貼る】", "")}\n\n${JSON.stringify(latest.audit, null, 2)}`, event.currentTarget));
+document.querySelector("#download-result").addEventListener("click", () => latest && downloadJson(latest.result, `${latest.result.name}_result.json`));
+document.querySelector("#download-audit").addEventListener("click", () => latest && downloadJson(latest.audit, `${latest.result.name}_audit.json`));
