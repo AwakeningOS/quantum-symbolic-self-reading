@@ -154,6 +154,23 @@ function sensitivity(delta) {
   return "HIGH";
 }
 
+function rankingMatchesExpected(observed, expected) {
+  return expected.length > 0
+    ? expected.every((label, index) => observed[index] === label)
+    : null;
+}
+
+function probabilitiesFromCounts(counts, shots) {
+  if (!counts || !Number.isInteger(shots) || shots <= 0) return null;
+  return Object.fromEntries(BASIS.map((label) => [label, counts[label] / shots]));
+}
+
+function summarizeSourceText(sourceText, maxLength = 320) {
+  if (typeof sourceText !== "string") return "";
+  const compact = sourceText.replace(/\s+/g, " ").trim();
+  return compact.length <= maxLength ? compact : `${compact.slice(0, maxLength)}…`;
+}
+
 export function runGateAblation(config) {
   const baseline = measureWithGates(config, config.gates);
   return config.gates.map((gate, removedIndex) => {
@@ -227,6 +244,48 @@ export function validateConfig(config) {
   return true;
 }
 
+export function makeAiInterpretationJson(result, audit = {}) {
+  const diagnosticSections = {
+    gate_trace: Array.isArray(audit.gate_trace) ? audit.gate_trace : null,
+    ablation: Array.isArray(audit.ablation) ? audit.ablation : null,
+    order_sensitivity: Array.isArray(audit.order_sensitivity) ? audit.order_sensitivity : null,
+    phase_sensitivity: Array.isArray(audit.phase_sensitivity) ? audit.phase_sensitivity : null,
+  };
+  const sectionsPresent = Object.fromEntries(
+    Object.entries(diagnosticSections).map(([key, value]) => [key, value !== null]),
+  );
+  return {
+    input_type: "measurement_result",
+    schema_version: "ai_interpretation_v1",
+    name: result.name,
+    description: result.description,
+    source_text_summary: result.source_text_summary ?? "",
+    component_meanings: result.component_meanings ?? {},
+    probability_source: result.probability_source,
+    count_source: result.count_source,
+    shots: result.shots,
+    seed: result.seed,
+    probabilities: result.probabilities,
+    sampled_counts: result.sampled_counts,
+    sampled_probabilities: result.sampled_probabilities,
+    observed_ranking_from_probabilities: result.observed_ranking_from_probabilities,
+    observed_ranking_from_counts: result.observed_ranking_from_counts,
+    expected_ranking: result.expected_ranking,
+    ranking_match_expected_from_probabilities: result.ranking_match_expected_from_probabilities,
+    ranking_match_expected_from_counts: result.ranking_match_expected_from_counts,
+    sections_present: sectionsPresent,
+    ...Object.fromEntries(Object.entries(diagnosticSections).filter(([, value]) => value !== null)),
+    anti_hallucination_instructions: [
+      "Do not invent probabilities, counts, rankings, L1 distances, gate effects, or sensitivities.",
+      "Use only values present in this JSON.",
+      "expected_ranking is a hypothesis, not an observed result.",
+      "probabilities and sampled_probabilities are different fields.",
+      "If a section is absent, say 入力なし.",
+    ],
+    safety_notice: "この結果は霊的真実・医学的事実・人生診断を証明するものではなく、象徴回路の出力を自己理解のために読むものです。",
+  };
+}
+
 export function runFullMeasurement(config) {
   validateConfig(config);
   const start = initialState(config.initial);
@@ -236,24 +295,37 @@ export function runFullMeasurement(config) {
   const expectedRanking = Array.isArray(config.expected_reading?.ranking)
     ? config.expected_reading.ranking
     : [config.expected_reading?.primary, config.expected_reading?.secondary].filter(Boolean);
-  const expectedMatch = expectedRanking.length > 0
-    ? expectedRanking.every((label, index) => ranking[index] === label)
+  const sampledCounts = config.shots ? sampleCounts(finalProbabilities, config.shots, config.seed ?? 0) : null;
+  const sampledProbabilities = probabilitiesFromCounts(sampledCounts, config.shots);
+  const rankingFromCounts = sampledCounts ? rankComponents(sampledCounts) : null;
+  const expectedMatch = rankingMatchesExpected(ranking, expectedRanking);
+  const expectedMatchFromCounts = rankingFromCounts
+    ? rankingMatchesExpected(rankingFromCounts, expectedRanking)
     : null;
   const componentPhases = phases(finalState);
   const result = {
-    schema_version: "1.0",
+    schema_version: "1.1",
     name: config.name ?? "unnamed",
     description: config.description ?? "",
+    source_text_summary: summarizeSourceText(config.source_text),
     mode: config.mode ?? "process",
     initial: config.initial,
     basis: BASIS,
     expected_ranking: expectedRanking,
     observed_ranking: ranking,
     expected_match: expectedMatch,
+    observed_ranking_from_probabilities: ranking,
+    observed_ranking_from_counts: rankingFromCounts,
+    ranking_match_expected_from_probabilities: expectedMatch,
+    ranking_match_expected_from_counts: expectedMatchFromCounts,
+    probability_source: "statevector",
+    count_source: "seeded_sampling",
     probabilities: finalProbabilities,
     shots: config.shots ?? null,
     seed: config.seed ?? null,
-    counts: config.shots ? sampleCounts(finalProbabilities, config.shots, config.seed ?? 0) : null,
+    counts: sampledCounts,
+    sampled_counts: sampledCounts,
+    sampled_probabilities: sampledProbabilities,
     final_statevector: Object.fromEntries(BASIS.map((label, index) => [label, finalState[index]])),
     norm: finalState.reduce((sum, z) => sum + abs2(z), 0),
     phases: Object.fromEntries(BASIS.map((label) => [label, {
@@ -268,7 +340,7 @@ export function runFullMeasurement(config) {
     component_meanings: config.component_meanings ?? {},
   };
   const audit = {
-    schema_version: "1.0",
+    schema_version: "1.1",
     measurement: result,
     gate_trace: traceGateEffects(start, config.gates),
     ablation: runGateAblation(config),
@@ -276,5 +348,6 @@ export function runFullMeasurement(config) {
     phase_sensitivity: runPhaseSensitivity(config),
     notice: "This is a mathematical expansion of a symbolic circuit configuration, not proof of spiritual truth, medical fact, or an absolute life diagnosis.",
   };
-  return { result, audit };
+  const aiInterpretation = makeAiInterpretationJson(result, audit);
+  return { result, audit, aiInterpretation };
 }

@@ -66,7 +66,8 @@ function simpleTable(headers, rows) {
 }
 
 function distributionCard(result) {
-  const section = card("B. 確率分布");
+  const section = card("B. 理想確率 / statevector probabilities");
+  section.append(element("p", "data-source-note", "probabilities = statevector から計算した理想確率"));
   const chart = element("div", "distribution");
   BASIS.forEach((label) => {
     const row = element("div", "bar-row");
@@ -93,16 +94,26 @@ function renderResults(measurement) {
     ["mode", result.mode],
     ["initial", result.initial],
     ["expected ranking", result.expected_ranking.join(" > ") || "未指定"],
-    ["observed ranking", result.observed_ranking.join(" > ")],
-    ["match / mismatch", result.expected_match === null ? "N/A" : result.expected_match ? "MATCH" : "MISMATCH"],
+    ["observed ranking / probabilities", result.observed_ranking_from_probabilities.join(" > ")],
+    ["observed ranking / counts", result.observed_ranking_from_counts?.join(" > ") ?? "入力なし"],
+    ["expected match / probabilities", result.ranking_match_expected_from_probabilities === null ? "N/A" : result.ranking_match_expected_from_probabilities ? "MATCH" : "MISMATCH"],
+    ["expected match / counts", result.ranking_match_expected_from_counts === null ? "N/A" : result.ranking_match_expected_from_counts ? "MATCH" : "MISMATCH"],
+    ["probability source", result.probability_source],
+    ["count source", result.count_source],
   ]));
   output.append(basic, distributionCard(result));
 
-  const counts = card("C. Counts");
-  counts.append(simpleTable(["shots", ...BASIS], [[
-    result.shots ?? "未指定",
-    ...BASIS.map((label) => result.counts?.[label] ?? "—"),
-  ]]));
+  const counts = card("C. サンプリング結果 / sampled counts");
+  counts.append(
+    element("p", "data-source-note", "sampled_counts = shots と seed による疑似サンプリング結果 / sampled_probabilities = sampled_counts ÷ shots"),
+    simpleTable(["component", "statevector probability", "sampled count", "sampled probability"], BASIS.map((label) => [
+      label,
+      formatNumber(result.probabilities[label], 8),
+      result.sampled_counts?.[label] ?? "入力なし",
+      result.sampled_probabilities ? formatNumber(result.sampled_probabilities[label], 8) : "入力なし",
+    ])),
+    element("p", "data-source-note", `shots = ${result.shots ?? "入力なし"} / seed = ${result.seed ?? "入力なし"}`),
+  );
   output.append(counts);
 
   const statevector = card("D. Final statevector");
@@ -164,7 +175,12 @@ function renderResults(measurement) {
 
   const notice = element("div", "notice warning");
   notice.append(element("strong", null, "注意書き"), element("p", null, "この結果は、霊的真実・医学的事実・人生の絶対診断を証明するものではありません。AIが作った象徴的な回路設定を、数学的に展開した結果です。自己理解・内省・物語の整理のために使ってください。医療・宗教・人生判断の絶対的根拠にはしないでください。"));
-  output.append(notice);
+  const aiWarning = element("div", "notice hallucination-warning");
+  aiWarning.append(
+    element("strong", null, "AIへ渡すデータを確認してください"),
+    element("p", null, "AIに解釈させる場合は、config JSONではなく、このサイトが出力した result JSON / audit JSON / AI解釈専用JSON を貼ってください。AIが入力にない確率・counts・順位・ゲート影響を作った場合、その解釈は破棄してください。"),
+  );
+  output.append(notice, aiWarning);
   resultSection.hidden = false;
   resultSection.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -237,6 +253,8 @@ document.querySelectorAll("[data-copy-prompt]").forEach((button) => {
 
 document.querySelector("#copy-result").addEventListener("click", (event) => latest && copyText(JSON.stringify(latest.result, null, 2), event.currentTarget));
 document.querySelector("#copy-audit").addEventListener("click", (event) => latest && copyText(JSON.stringify(latest.audit, null, 2), event.currentTarget));
-document.querySelector("#copy-prompt-audit").addEventListener("click", (event) => latest && copyText(`${interpretationPrompt.replace("【ここにサイトで出た result JSON または audit JSON を貼る】", "")}\n\n${JSON.stringify(latest.audit, null, 2)}`, event.currentTarget));
+document.querySelector("#copy-ai-json").addEventListener("click", (event) => latest && copyText(JSON.stringify(latest.aiInterpretation, null, 2), event.currentTarget));
+document.querySelector("#copy-prompt-ai").addEventListener("click", (event) => latest && copyText(`${interpretationPrompt.replace("【ここにサイトの result JSON / audit JSON / AI解釈専用JSON を貼る】", "")}\n\n${JSON.stringify(latest.aiInterpretation, null, 2)}`, event.currentTarget));
 document.querySelector("#download-result").addEventListener("click", () => latest && downloadJson(latest.result, `${latest.result.name}_result.json`));
 document.querySelector("#download-audit").addEventListener("click", () => latest && downloadJson(latest.audit, `${latest.result.name}_audit.json`));
+document.querySelector("#download-ai-json").addEventListener("click", () => latest && downloadJson(latest.aiInterpretation, `${latest.result.name}_ai_interpretation.json`));

@@ -51,7 +51,7 @@
         <article class="step-card">
           <span class="step-number">03</span>
           <h3>結果を読み解く</h3>
-          <p>出力された result JSON / audit JSON をコピーし、「AI解釈プロンプト」と一緒にAIへ貼って、結果を読み解いてもらってください。</p>
+          <p>サイトが出力したAI解釈専用JSONを、厳密な「AI解釈プロンプト」と一緒にAIへ貼ってください。config JSONを結果解釈に使わないでください。</p>
         </article>
       </div>
     </section>
@@ -71,6 +71,10 @@
     <section class="section input-section" id="measurement">
       <p class="section-kicker">STEP 02 · MEASURE</p>
       <h2>config JSONを貼り付ける</h2>
+      <aside class="measurement-warning" aria-label="config JSONの注意">
+        <strong>注意：config JSON は測定結果ではありません</strong>
+        <p>AIが出した config JSON は、まだ測定結果ではありません。config JSON内の expected_reading は「AIの予想」であり、実測値ではありません。必ずこのサイトで測定してから、result JSON / audit JSON / AI解釈専用JSON をAIに読ませてください。</p>
+      </aside>
       <label class="sr-only" for="config-input">config JSON</label>
       <textarea id="config-input" spellcheck="false" placeholder="ここにAIが出力した config JSON を貼ってください。"></textarea>
       <div id="error-message" class="error" role="alert" tabindex="-1" hidden></div>
@@ -88,16 +92,24 @@
     <section class="section results-section" id="results" hidden>
       <p class="section-kicker">MEASUREMENT RESULT</p>
       <h2>測定結果</h2>
+      <div class="measurement-warning">
+        <strong>AIへは測定後のJSONだけを渡してください</strong>
+        <p>AIに解釈させる場合は、config JSONではなく、このサイトが出力した result JSON / audit JSON / AI解釈専用JSON を貼ってください。AIが入力にない確率・counts・順位・ゲート影響を作った場合、その解釈は破棄してください。</p>
+      </div>
       <div id="result-content"></div>
       <div class="copy-panel">
-        <h3>結果をコピー・保存</h3>
+        <p class="recommended-label">RECOMMENDED</p>
+        <h3>AIへ安全に渡す</h3>
+        <button class="button primary recommended-action" id="copy-prompt-ai" type="button">AI解釈プロンプト + AI解釈専用JSONをコピー</button>
+        <h3 class="secondary-actions-title">個別にコピー・保存</h3>
         <div class="button-row">
           <button class="button secondary" id="copy-result" type="button">result JSONをコピー</button>
           <button class="button secondary" id="copy-audit" type="button">audit JSONをコピー</button>
+          <button class="button secondary" id="copy-ai-json" type="button">AI解釈専用JSONをコピー</button>
           <button class="button secondary" type="button" data-copy-prompt="interpretation">AI解釈プロンプトをコピー</button>
-          <button class="button primary" id="copy-prompt-audit" type="button">AI解釈プロンプト + audit JSONをコピー</button>
           <button class="button ghost" id="download-result" type="button">result JSONを保存</button>
           <button class="button ghost" id="download-audit" type="button">audit JSONを保存</button>
+          <button class="button ghost" id="download-ai-json" type="button">AI解釈専用JSONを保存</button>
         </div>
       </div>
     </section>
@@ -105,7 +117,7 @@
     <section class="section prompt-section" id="interpretation">
       <p class="section-kicker">STEP 03 · INTERPRET</p>
       <div class="section-heading">
-        <div><h2>AI解釈プロンプト</h2><p>測定後は audit JSON と一緒にコピーすると、全診断データを渡せます。</p></div>
+        <div><h2>AI解釈プロンプト</h2><p>入力に存在しない数値を作らせない厳密版です。測定後のAI解釈専用JSONと組み合わせてください。</p></div>
         <button class="button secondary" type="button" data-copy-prompt="interpretation">AI解釈プロンプトをコピー</button>
       </div>
       <details>
