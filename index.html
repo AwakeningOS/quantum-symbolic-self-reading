@@ -83,6 +83,13 @@
 
     <pre id="encoding-prompt" class="prompt" hidden></pre>
     <button id="encoder-copy-button" type="button" data-copy-prompt="encoding" hidden></button>
+    <pre id="interpretation-prompt" class="prompt" hidden></pre>
+    <button id="copy-result" type="button" hidden></button>
+    <button id="copy-audit" type="button" hidden></button>
+    <button id="copy-ai-json" type="button" hidden></button>
+    <button id="download-result" type="button" hidden></button>
+    <button id="download-audit" type="button" hidden></button>
+    <button id="download-ai-json" type="button" hidden></button>
 
     <section class="section input-section" id="story-entry">
       <p class="section-kicker">STEP 01 · WRITE YOUR STORY</p>
@@ -117,34 +124,12 @@
     <section class="section results-section" id="results" hidden>
       <p class="section-kicker">MEASUREMENT RESULT</p>
       <h2>測定結果</h2>
-      <div id="result-content"></div>
       <div class="copy-panel">
         <p class="recommended-label">RECOMMENDED</p>
         <h3>AIへ安全に渡す</h3>
         <button class="button primary recommended-action" id="copy-prompt-ai" type="button">AI解釈プロンプト + AI解釈専用JSONをコピー</button>
-        <h3 class="secondary-actions-title">個別にコピー・保存</h3>
-        <div class="button-row">
-          <button class="button secondary" id="copy-result" type="button">result JSONをコピー</button>
-          <button class="button secondary" id="copy-audit" type="button">audit JSONをコピー</button>
-          <button class="button secondary" id="copy-ai-json" type="button">AI解釈専用JSONをコピー</button>
-          <button class="button secondary" type="button" data-copy-prompt="interpretation">AI解釈プロンプトをコピー</button>
-          <button class="button ghost" id="download-result" type="button">result JSONを保存</button>
-          <button class="button ghost" id="download-audit" type="button">audit JSONを保存</button>
-          <button class="button ghost" id="download-ai-json" type="button">AI解釈専用JSONを保存</button>
-        </div>
       </div>
-    </section>
-
-    <section class="section prompt-section" id="interpretation">
-      <p class="section-kicker">STEP 03 · INTERPRET</p>
-      <div class="section-heading">
-        <div><h2>AI解釈プロンプト</h2><p>入力に存在しない数値を作らせない厳密版です。測定後のAI解釈専用JSONと組み合わせてください。</p></div>
-        <button class="button secondary" type="button" data-copy-prompt="interpretation">AI解釈プロンプトをコピー</button>
-      </div>
-      <details>
-        <summary>プロンプト全文を表示</summary>
-        <pre id="interpretation-prompt" class="prompt"></pre>
-      </details>
+      <div id="result-content"></div>
     </section>
   </main>
 
