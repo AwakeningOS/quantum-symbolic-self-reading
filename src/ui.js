@@ -275,20 +275,6 @@ document.querySelector("#measure-button").addEventListener("click", () => {
   }
 });
 
-async function loadSample(path, mode) {
-  clearError();
-  try {
-    const response = await fetch(path);
-    if (!response.ok) throw new Error(`サンプルJSONを読み込めませんでした（HTTP ${response.status}）。`);
-    const sample = await response.json();
-    input.value = JSON.stringify(sample, null, 2);
-    updateModeUi(mode);
-    input.focus();
-  } catch (error) {
-    showError(error);
-  }
-}
-
 document.querySelector("#clear-button").addEventListener("click", () => {
   input.value = "";
   latest = null;
