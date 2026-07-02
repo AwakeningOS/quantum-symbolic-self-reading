@@ -97,12 +97,12 @@
       <p>ここに分析したい人生・物語・思想・体験などを書き込んで下さい。</p>
       <div class="measurement-warning">
         <strong>AI変換の品質について</strong>
-        <p>使用するAIの性能によって、物語から回路JSONへ変換する品質が変わります。変換品質は、測定結果とAI解釈の精度に影響します。</p>
+        <p>使用するAIの性能によって、記入内容を量子回路用JSONへ変換する精度と結果の解釈・解説の品質が変わります。</p>
       </div>
       <label class="sr-only" for="story-input">分析したい人生・物語・思想・体験など</label>
       <textarea class="story-input" id="story-input" spellcheck="true" placeholder="ここに分析したい人生・物語・思想・体験などを書き込んで下さい。"></textarea>
       <div class="button-row">
-        <button class="button primary" id="copy-encoder-with-story" type="button">非スピリチュアル・人生・恋愛モードのAI変換プロンプト+記入内容をコピー</button>
+        <button class="button primary" id="copy-encoder-with-story" type="button">非スピリチュアル・人生・恋愛モードのAI変換用プロンプト+記入内容をコピー</button>
       </div>
       <p class="data-source-note" id="story-copy-status" aria-live="polite"></p>
     </section>
@@ -112,7 +112,7 @@
       <h2>AIの変換結果を貼り付ける</h2>
 
       <label class="sr-only" for="config-input">config JSON</label>
-      <textarea id="config-input" spellcheck="false" placeholder="ここにAIが出力した config JSON を貼ってください。"></textarea>
+      <textarea id="config-input" spellcheck="false" placeholder="ここにAIが出力した量子回路用JSON を貼ってください。"></textarea>
       <div id="error-message" class="error" role="alert" tabindex="-1" hidden></div>
       <div class="button-row">
         <button class="button primary" id="measure-button" type="button">測定する</button>
@@ -126,8 +126,8 @@
       <h2>測定結果</h2>
       <div class="copy-panel">
         <p class="recommended-label">RECOMMENDED</p>
-        <h3>AIへ安全に渡す</h3>
-        <button class="button primary recommended-action" id="copy-prompt-ai" type="button">AI解釈プロンプト + AI解釈専用JSONをコピー</button>
+        <h3>量子計算結果をAIへ渡し解析・解説してもらって下さい</h3>
+        <button class="button primary recommended-action" id="copy-prompt-ai" type="button">AI解析用プロンプト + 量子計算結果をコピー</button>
       </div>
       <div id="result-content"></div>
     </section>
