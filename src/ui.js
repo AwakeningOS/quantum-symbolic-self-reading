@@ -22,6 +22,21 @@ const ENCODER_STORY_PLACEHOLDERS = {
   seeker: "【ここにユーザーの人生・思想・体験を書く】",
 };
 
+const COMPONENT_GUIDES = {
+  general: {
+    a: { name: "内奥", axis: "当事 × 潜在", meaning: "まだ形になっていない本音、願い、傷、恐れ、才能、可能性。" },
+    b: { name: "実相", axis: "当事 × 顕在", meaning: "実際の生活、身体、仕事、役割、行動、習慣、いま表に出ている状態。" },
+    c: { name: "底流", axis: "世界 × 潜在", meaning: "本人の背後で働く価値観、社会規範、家族観、時代性、深層パターン。" },
+    d: { name: "契機", axis: "世界 × 顕在", meaning: "外から来た出来事、出会い、喪失、転機、支援、現実の揺さぶり。" },
+  },
+  seeker: {
+    a: { name: "魂的個我", axis: "個我 × 非顕現", meaning: "魂の奥にある願い、祈り、問い、未発現の自己。" },
+    b: { name: "顕現した個我", axis: "個我 × 顕現", meaning: "生活、身体、修行、信仰の実践、現実に生きている自分。" },
+    c: { name: "非顕現の神/真理", axis: "神性 × 非顕現", meaning: "まだ形にならない真理、神観、背後の秩序、沈黙の深み。" },
+    d: { name: "顕現した神性/恩寵", axis: "神性 × 顕現", meaning: "啓示、神秘体験、導き、恩寵、外から訪れた霊的出来事。" },
+  },
+};
+
 function element(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -98,6 +113,82 @@ function simpleTable(headers, rows) {
   return wrapper;
 }
 
+function componentGuide(result) {
+  return COMPONENT_GUIDES[result.mode_profile] ?? COMPONENT_GUIDES.general;
+}
+
+function componentLabel(result, label) {
+  const guide = componentGuide(result)[label];
+  return guide ? `${label} / ${guide.name}` : label;
+}
+
+function rankingText(result) {
+  return (result.observed_ranking_from_probabilities ?? [])
+    .map((label) => componentLabel(result, label))
+    .join(" > ");
+}
+
+function resultGuideCard(result) {
+  const guide = componentGuide(result);
+  const section = card("この測定結果の読み方");
+  section.append(element("p", "data-source-note", "下の数値は、AIが作った回路JSONをブラウザ内で計算した結果です。まずは、どの象徴が強く残ったか、予想と実測がどれだけズレたか、二つの軸がどれだけ絡み合ったかを見ます。"));
+
+  const observed = result.observed_ranking_from_probabilities ?? [];
+  const top = observed[0];
+  const topGuide = guide[top];
+  const summary = element("div", "technical-note");
+  summary.append(element("strong", null, "今回の着地"));
+  if (top && topGuide) {
+    summary.append(element("p", null, `この測定では、最も強く残った成分は ${top}「${topGuide.name}」です。これは「${topGuide.meaning}」に関わる力が、回路を通したあとで最も大きく残ったことを示します。`));
+  }
+  summary.append(element("p", null, `観測順位は ${rankingText(result) || "未指定"} です。expected ranking と違っていても失敗ではありません。むしろ、AIの予想と回路計算のズレが、その物語の構造的な見どころになります。`));
+  section.append(summary);
+
+  section.append(simpleTable(["成分", "象徴", "軸の組み合わせ", "意味", "今回の確率"], BASIS.map((label) => {
+    const item = guide[label];
+    return [
+      label,
+      item?.name ?? label,
+      item?.axis ?? "-",
+      item?.meaning ?? "-",
+      formatNumber(result.probabilities[label], 6),
+    ];
+  })));
+
+  return section;
+}
+
+function axisGuideCard(result) {
+  const entanglement = result.entanglement;
+  const subjectLeft = axisDisplayLabel(result.tensor_structure.subject_axis["0"]);
+  const subjectRight = axisDisplayLabel(result.tensor_structure.subject_axis["1"]);
+  const manifestationLeft = axisDisplayLabel(result.tensor_structure.manifestation_axis["0"]);
+  const manifestationRight = axisDisplayLabel(result.tensor_structure.manifestation_axis["1"]);
+  const section = card("二つの軸から見る意味");
+  section.append(simpleTable(["軸", "問い", "今回のバランス", "読み方"], [
+    [
+      `主体軸 (${subjectLeft} ↔ ${subjectRight})`,
+      "これは誰の物語として動いているか",
+      `${subjectLeft} ${formatNumber(entanglement.axis_populations.individual)} / ${subjectRight} ${formatNumber(entanglement.axis_populations.transcendent)}`,
+      `${subjectLeft}側が強いほど本人・当事者の内側や現実が前に出ます。${subjectRight}側が強いほど社会、家族、時代、神性、出来事など大きな構造が前に出ます。`,
+    ],
+    [
+      `顕現軸 (${manifestationLeft} ↔ ${manifestationRight})`,
+      "それは形になっているか、まだ背後にあるか",
+      `${manifestationLeft} ${formatNumber(entanglement.axis_populations.unmanifest)} / ${manifestationRight} ${formatNumber(entanglement.axis_populations.manifest)}`,
+      `${manifestationLeft}側が強いほど本音・意味・真理など、まだ形にならない力が前に出ます。${manifestationRight}側が強いほど行動・出来事・現実化した変化が前に出ます。`,
+    ],
+  ]));
+  section.append(element("p", "data-source-note", `Concurrence は、この二つの軸がどれだけ切り離せないかを見る値です。今回の値は ${formatNumber(entanglement.concurrence)} (${entanglement.entanglement_level}) です。高いほど「本人の問い」と「現実化/出来事の問い」が一体化しています。`));
+  return section;
+}
+
+function detailStartCard() {
+  const section = card("詳細パラメーター");
+  section.append(element("p", "data-source-note", "ここから下は、測定の根拠になる詳細データです。AI解釈に渡すときは、上の『AI解釈プロンプト + AI解釈専用JSONをコピー』ボタンだけで十分です。"));
+  return section;
+}
+
 function distributionCard(result) {
   const section = card("B. 理想確率 / statevector probabilities");
   section.append(element("p", "data-source-note", "probabilities = statevector から計算した理想確率"));
@@ -119,6 +210,8 @@ function distributionCard(result) {
 function renderResults(measurement) {
   const { result, audit } = measurement;
   output.replaceChildren();
+
+  output.append(resultGuideCard(result), axisGuideCard(result), detailStartCard());
 
   const basic = card("A. 基本情報");
   basic.append(simpleTable(["項目", "値"], [
