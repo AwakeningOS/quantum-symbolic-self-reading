@@ -1,5 +1,18 @@
 export const BASIS = ["a", "b", "c", "d"];
 
+export const AXIS_LABELS = {
+  general: {
+    subject_axis: { "0": "当事 (a,b)", "1": "世界 (c,d)" },
+    manifestation_axis: { "0": "潜在 (a,c)", "1": "顕在 (b,d)" },
+    components: { a: "内奥", b: "実相", c: "底流", d: "契機" },
+  },
+  seeker: {
+    subject_axis: { "0": "個我 (a,b)", "1": "超越 (c,d)" },
+    manifestation_axis: { "0": "非顕現 (a,c)", "1": "顕現 (b,d)" },
+    components: { a: "魂的個我", b: "顕現した個我", c: "非顕現の真理", d: "顕現した神性" },
+  },
+};
+
 export function complex(re = 0, im = 0) {
   return { re, im };
 }
@@ -259,7 +272,7 @@ export function makeAiInterpretationJson(result, audit = {}) {
   );
   return {
     input_type: "measurement_result",
-    schema_version: "ai_interpretation_v3",
+    schema_version: "ai_interpretation_v4",
     name: result.name,
     description: result.description,
     mode_profile: result.mode_profile,
@@ -474,8 +487,9 @@ export function runFullMeasurement(config) {
   const componentPhases = phases(finalState);
   const entanglement = analyzeEntanglement(finalState);
   const classicalControls = runClassicalControls(config, finalProbabilities);
+  const profile = config.mode_profile === "seeker" ? "seeker" : "general";
   const result = {
-    schema_version: "1.3",
+    schema_version: "1.4",
     name: config.name ?? "unnamed",
     description: config.description ?? "",
     mode_profile: config.mode_profile ?? "legacy",
@@ -484,8 +498,10 @@ export function runFullMeasurement(config) {
     initial: config.initial,
     basis: BASIS,
     tensor_structure: {
-      subject_axis: { "0": "individual (a,b)", "1": "transcendent (c,d)" },
-      manifestation_axis: { "0": "unmanifest (a,c)", "1": "manifest (b,d)" },
+      profile,
+      subject_axis: AXIS_LABELS[profile].subject_axis,
+      manifestation_axis: AXIS_LABELS[profile].manifestation_axis,
+      component_labels: AXIS_LABELS[profile].components,
       bit_mapping: "index = 2*q1 + q2; a=00, b=01, c=10, d=11",
     },
     entanglement,
@@ -538,7 +554,7 @@ export function runFullMeasurement(config) {
   const auditAblation = runGateAblation(config);
   const gateResonance = computeGateResonance(auditGateTrace, auditAblation, result.gates_summary);
   const audit = {
-    schema_version: "1.3",
+    schema_version: "1.4",
     measurement: result,
     gate_trace: auditGateTrace,
     ablation: auditAblation,

@@ -66,6 +66,10 @@ function modeLabel(mode) {
   return MODE_LABELS[mode] ?? `不明なモード (${mode})`;
 }
 
+function axisDisplayLabel(label) {
+  return label.replace(/\s*\([^)]*\)\s*$/, "");
+}
+
 function updateModeUi(mode) {
   selectedMode = mode === "seeker" ? "seeker" : "general";
   const prompt = getEncoderPrompt(selectedMode);
@@ -134,16 +138,20 @@ function renderResults(measurement) {
   output.append(basic, distributionCard(result));
 
   const entanglement = result.entanglement;
+  const subjectLeft = axisDisplayLabel(result.tensor_structure.subject_axis["0"]);
+  const subjectRight = axisDisplayLabel(result.tensor_structure.subject_axis["1"]);
+  const manifestationLeft = axisDisplayLabel(result.tensor_structure.manifestation_axis["0"]);
+  const manifestationRight = axisDisplayLabel(result.tensor_structure.manifestation_axis["1"]);
   const entanglementCard = card("二軸構造とエンタングルメント");
   entanglementCard.append(
     simpleTable(["指標", "値"], [
       ["Concurrence (絡み合い度)", `${formatNumber(entanglement.concurrence)} (${entanglement.entanglement_level})`],
       ["エンタングルメントエントロピー", `${formatNumber(entanglement.entanglement_entropy_bits)} bit`],
       ["Purity (主体軸)", formatNumber(entanglement.purity.subject_axis)],
-      ["主体軸バランス (個我 ↔ 超越)", `個我 ${formatNumber(entanglement.axis_populations.individual)} / 超越 ${formatNumber(entanglement.axis_populations.transcendent)}`],
-      ["顕現軸バランス (非顕現 ↔ 顕現)", `非顕現 ${formatNumber(entanglement.axis_populations.unmanifest)} / 顕現 ${formatNumber(entanglement.axis_populations.manifest)}`],
+      [`主体軸バランス (${subjectLeft} ↔ ${subjectRight})`, `${subjectLeft} ${formatNumber(entanglement.axis_populations.individual)} / ${subjectRight} ${formatNumber(entanglement.axis_populations.transcendent)}`],
+      [`顕現軸バランス (${manifestationLeft} ↔ ${manifestationRight})`, `${manifestationLeft} ${formatNumber(entanglement.axis_populations.unmanifest)} / ${manifestationRight} ${formatNumber(entanglement.axis_populations.manifest)}`],
     ]),
-    element("p", "data-source-note", "Concurrence は『主体軸(個我/超越)の問い』と『顕現軸(非顕現/顕現)の問い』がどれだけ不可分に絡み合っているかを示します。0 = 二つの問いは独立、1 = 最大の絡み合い。"),
+    element("p", "data-source-note", `Concurrence は『主体軸(${subjectLeft}/${subjectRight})の問い』と『顕現軸(${manifestationLeft}/${manifestationRight})の問い』がどれだけ不可分に絡み合っているかを示します。0 = 二つの問いは独立、1 = 最大の絡み合い。`),
   );
 
   const controls = result.classical_controls;
