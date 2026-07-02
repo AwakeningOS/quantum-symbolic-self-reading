@@ -131,6 +131,7 @@ export function traceGateEffects(startState, gates) {
       target: gate.target,
       before,
       after,
+      concurrence_after: concurrence(state),
       delta: Object.fromEntries(BASIS.map((label) => [label, after[label] - before[label]])),
     });
   });
@@ -185,6 +186,7 @@ export function runGateAblation(config) {
       primary: measured.primary,
       secondary: measured.secondary,
       probabilities: measured.probabilities,
+      concurrence: concurrence(measured.state),
       l1_difference: l1Difference,
     };
   });
@@ -250,18 +252,26 @@ export function makeAiInterpretationJson(result, audit = {}) {
     ablation: Array.isArray(audit.ablation) ? audit.ablation : null,
     order_sensitivity: Array.isArray(audit.order_sensitivity) ? audit.order_sensitivity : null,
     phase_sensitivity: Array.isArray(audit.phase_sensitivity) ? audit.phase_sensitivity : null,
+    gate_resonance: Array.isArray(audit.gate_resonance) ? audit.gate_resonance : null,
   };
   const sectionsPresent = Object.fromEntries(
     Object.entries(diagnosticSections).map(([key, value]) => [key, value !== null]),
   );
   return {
     input_type: "measurement_result",
-    schema_version: "ai_interpretation_v1",
+    schema_version: "ai_interpretation_v3",
     name: result.name,
     description: result.description,
     mode_profile: result.mode_profile,
     source_text_summary: result.source_text_summary ?? "",
     component_meanings: result.component_meanings ?? {},
+    life_question: result.life_question,
+    expected_reading_full: result.expected_reading_full,
+    gates_summary: result.gates_summary,
+    gate_resonance: Array.isArray(audit.gate_resonance) ? audit.gate_resonance : null,
+    tensor_structure: result.tensor_structure,
+    entanglement: result.entanglement,
+    classical_controls: result.classical_controls,
     probability_source: result.probability_source,
     count_source: result.count_source,
     shots: result.shots,
@@ -282,9 +292,166 @@ export function makeAiInterpretationJson(result, audit = {}) {
       "expected_ranking is a hypothesis, not an observed result.",
       "probabilities and sampled_probabilities are different fields.",
       "If a section is absent, say 入力なし.",
+      "concurrence, purity, entropy, bloch_z, phase_dependence, interference_gap はサイトが計算した値である。存在しない値を推定・補完しない。",
+      "entanglement_level と phase_dependence_level / interference_gap_level はサイトの閾値判定であり、AIが独自の閾値で再判定しない。",
+      "phase_dependence と interference_gap が両方 LOW の場合、『この物語の量子的構造(位相・干渉)は結果に寄与していない』と明示的に述べること。",
+      "gate_resonance の resonance_label と resonance_ratio はサイトが計算した値である。AIが即時効果と反実仮想重みから独自にラベルを再判定しない。",
+      "gates_summary の meaning と phi_label はエンコーダとサイトが付与した意味情報である。存在しないゲートや意味を創作しない。",
     ],
     safety_notice: "この結果は霊的真実・医学的事実・人生診断を証明するものではなく、象徴回路の出力を自己理解のために読むものです。",
   };
+}
+
+export function concurrence(state) {
+  const det = sub(mul(state[0], state[3]), mul(state[1], state[2]));
+  return Math.min(1, 2 * Math.sqrt(abs2(det)));
+}
+
+export function reducedDensityMatrix(state, axis) {
+  const rho = [[complex(), complex()], [complex(), complex()]];
+  for (let x = 0; x < 2; x += 1) {
+    for (let xp = 0; xp < 2; xp += 1) {
+      let re = 0;
+      let im = 0;
+      for (let t = 0; t < 2; t += 1) {
+        const i = axis === "subject" ? 2 * x + t : 2 * t + x;
+        const j = axis === "subject" ? 2 * xp + t : 2 * t + xp;
+        re += state[i].re * state[j].re + state[i].im * state[j].im;
+        im += state[i].im * state[j].re - state[i].re * state[j].im;
+      }
+      rho[x][xp] = complex(re, im);
+    }
+  }
+  return rho;
+}
+
+export function densityPurity(rho) {
+  let sum = 0;
+  for (let x = 0; x < 2; x += 1) {
+    for (let y = 0; y < 2; y += 1) sum += abs2(rho[x][y]);
+  }
+  return sum;
+}
+
+export function entanglementEntropyFromConcurrence(c) {
+  const g = Math.sqrt(Math.max(0, 1 - c * c));
+  const h = (l) => (l <= 1e-15 ? 0 : -l * Math.log2(l));
+  return h((1 + g) / 2) + h((1 - g) / 2);
+}
+
+export function blochZ(rho) {
+  return rho[0][0].re - rho[1][1].re;
+}
+
+export function entanglementLevel(c) {
+  if (c < 0.1) return "SEPARABLE_LIKE";
+  if (c < 0.5) return "WEAKLY_ENTANGLED";
+  if (c < 0.9) return "STRONGLY_ENTANGLED";
+  return "NEAR_MAXIMAL";
+}
+
+export function analyzeEntanglement(state) {
+  const c = concurrence(state);
+  const rhoSubject = reducedDensityMatrix(state, "subject");
+  const rhoManifestation = reducedDensityMatrix(state, "manifestation");
+  return {
+    concurrence: c,
+    tangle: c * c,
+    entanglement_level: entanglementLevel(c),
+    entanglement_entropy_bits: entanglementEntropyFromConcurrence(c),
+    purity: {
+      subject_axis: densityPurity(rhoSubject),
+      manifestation_axis: densityPurity(rhoManifestation),
+    },
+    bloch_z: {
+      subject_axis: blochZ(rhoSubject),
+      manifestation_axis: blochZ(rhoManifestation),
+    },
+    axis_populations: {
+      individual: rhoSubject[0][0].re,
+      transcendent: rhoSubject[1][1].re,
+      unmanifest: rhoManifestation[0][0].re,
+      manifest: rhoManifestation[1][1].re,
+    },
+  };
+}
+
+export function runClassicalMarkov(config) {
+  const p = [0, 0, 0, 0];
+  p[basisIndex(config.initial)] = 1;
+  for (const gate of config.gates) {
+    const i = basisIndex(gate.source);
+    const j = basisIndex(gate.target);
+    const c2 = Math.cos(gate.theta) ** 2;
+    const s2 = Math.sin(gate.theta) ** 2;
+    const pi = p[i];
+    const pj = p[j];
+    p[i] = c2 * pi + s2 * pj;
+    p[j] = s2 * pi + c2 * pj;
+  }
+  return Object.fromEntries(BASIS.map((label, k) => [label, p[k]]));
+}
+
+function l1Distance(left, right) {
+  return BASIS.reduce((sum, label) => sum + Math.abs(left[label] - right[label]), 0);
+}
+
+export function runClassicalControls(config, quantumProbabilities) {
+  const phiZeroGates = config.gates.map((gate) => ({ ...gate, phi: 0 }));
+  const phiZeroProbabilities = probabilities(applyGates(initialState(config.initial), phiZeroGates));
+  const classicalProbabilities = runClassicalMarkov(config);
+  const phaseDependence = l1Distance(quantumProbabilities, phiZeroProbabilities);
+  const interferenceGap = l1Distance(quantumProbabilities, classicalProbabilities);
+  return {
+    phi_zero_probabilities: phiZeroProbabilities,
+    classical_markov_probabilities: classicalProbabilities,
+    phase_dependence: phaseDependence,
+    phase_dependence_level: sensitivity(phaseDependence),
+    interference_gap: interferenceGap,
+    interference_gap_level: sensitivity(interferenceGap),
+    note: "phase_dependence: 全ゲートphi=0との確率L1距離。interference_gap: 干渉なし古典マルコフ遷移との確率L1距離。両方LOWなら、このconfigに複素振幅を使う経験的正当性は弱い。",
+  };
+}
+
+export function phiLabel(phi) {
+  const wrapped = Math.atan2(Math.sin(phi), Math.cos(phi));
+  const candidates = [
+    [0, "同位相(受容・同調)"],
+    [Math.PI / 2, "直交(葛藤・未統合)"],
+    [-Math.PI / 2, "折返し(反転的気づき)"],
+  ];
+  let best = ["逆位相(反転・拒絶)", Math.min(Math.abs(wrapped - Math.PI), Math.abs(wrapped + Math.PI))];
+  for (const [anchor, label] of candidates) {
+    const distance = Math.abs(wrapped - anchor);
+    if (distance < best[1]) best = [label, distance];
+  }
+  return best[1] <= 0.3 ? best[0] : "中間位相";
+}
+
+export function computeGateResonance(gateTrace, ablation, gatesSummary) {
+  return gateTrace.map((step, index) => {
+    const immediate = Math.max(...Object.values(step.delta).map(Math.abs));
+    const weight = ablation[index].l1_difference;
+    let ratio = null;
+    let label;
+    if (immediate < 0.01) {
+      label = weight >= 0.1 ? "DORMANT_BUT_STRUCTURAL" : "NEGLIGIBLE";
+    } else {
+      ratio = weight / immediate;
+      if (ratio >= 2 && immediate < 0.3) label = "QUIET_SEED";
+      else if (ratio >= 2) label = "AMPLIFIED";
+      else if (ratio <= 0.7) label = "WASHED_OUT";
+      else label = "PROPORTIONATE";
+    }
+    return {
+      gate: step.gate,
+      meaning: gatesSummary[index]?.meaning ?? "",
+      immediate_effect: immediate,
+      counterfactual_weight: weight,
+      resonance_ratio: ratio,
+      resonance_label: label,
+    };
+  });
 }
 
 export function runFullMeasurement(config) {
@@ -304,8 +471,10 @@ export function runFullMeasurement(config) {
     ? rankingMatchesExpected(rankingFromCounts, expectedRanking)
     : null;
   const componentPhases = phases(finalState);
+  const entanglement = analyzeEntanglement(finalState);
+  const classicalControls = runClassicalControls(config, finalProbabilities);
   const result = {
-    schema_version: "1.1",
+    schema_version: "1.3",
     name: config.name ?? "unnamed",
     description: config.description ?? "",
     mode_profile: config.mode_profile ?? "legacy",
@@ -313,6 +482,13 @@ export function runFullMeasurement(config) {
     mode: config.mode ?? "process",
     initial: config.initial,
     basis: BASIS,
+    tensor_structure: {
+      subject_axis: { "0": "individual (a,b)", "1": "transcendent (c,d)" },
+      manifestation_axis: { "0": "unmanifest (a,c)", "1": "manifest (b,d)" },
+      bit_mapping: "index = 2*q1 + q2; a=00, b=01, c=10, d=11",
+    },
+    entanglement,
+    classical_controls: classicalControls,
     expected_ranking: expectedRanking,
     observed_ranking: ranking,
     expected_match: expectedMatch,
@@ -340,12 +516,32 @@ export function runFullMeasurement(config) {
     }])),
     alignment: alignmentScores(finalState),
     component_meanings: config.component_meanings ?? {},
+    life_question: typeof config.life_question === "string" ? config.life_question : null,
+    expected_reading_full: {
+      ranking: expectedRanking,
+      pattern: config.expected_reading?.pattern ?? null,
+      notes: config.expected_reading?.notes ?? null,
+    },
+    gates_summary: config.gates.map((gate) => ({
+      name: gate.name,
+      source: gate.source,
+      target: gate.target,
+      strength: gate.strength,
+      theta: gate.theta,
+      phi: gate.phi,
+      phi_label: phiLabel(gate.phi),
+      meaning: typeof gate.meaning === "string" ? gate.meaning : "",
+    })),
   };
+  const auditGateTrace = traceGateEffects(start, config.gates);
+  const auditAblation = runGateAblation(config);
+  const gateResonance = computeGateResonance(auditGateTrace, auditAblation, result.gates_summary);
   const audit = {
-    schema_version: "1.1",
+    schema_version: "1.3",
     measurement: result,
-    gate_trace: traceGateEffects(start, config.gates),
-    ablation: runGateAblation(config),
+    gate_trace: auditGateTrace,
+    ablation: auditAblation,
+    gate_resonance: gateResonance,
     order_sensitivity: runOrderSensitivity(config),
     phase_sensitivity: runPhaseSensitivity(config),
     notice: "This is a mathematical expansion of a symbolic circuit configuration, not proof of spiritual truth, medical fact, or an absolute life diagnosis.",

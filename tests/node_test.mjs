@@ -3,9 +3,16 @@ import { readFile } from "node:fs/promises";
 import {
   BASIS,
   abs2,
+  analyzeEntanglement,
+  applyGates,
+  computeGateResonance,
+  concurrence,
   initialState,
   makeAiInterpretationJson,
+  phiLabel,
+  probabilities,
   rankComponents,
+  runClassicalControls,
   runFullMeasurement,
   validateConfig,
 } from "../src/quantum.js";
@@ -69,13 +76,14 @@ assert.deepEqual(aiInterpretation.sections_present, {
   ablation: true,
   order_sensitivity: true,
   phase_sensitivity: true,
+  gate_resonance: true,
 }, "AI JSONは監査セクションの有無を明示");
 assert.equal(aiInterpretation.gate_trace.length, config.gates.length, "AI JSONに実在する gate_trace を含める");
 assert.equal(makeAiInterpretationJson(result).sections_present.gate_trace, false, "軽量AI JSONは欠けたセクションをfalseにする");
 assert.match(encodingPrompt, /あなたは測定結果を出してはいけません/, "19. encoder は測定結果を作らない");
 assert.match(encodingPrompt, /expected_reading は「予想」または「仮説」/, "expected_reading は仮説と明記");
 assert.match(interpretationPrompt, /これは測定前の config JSON です。実測確率が含まれていないため/, "config JSONだけを結果解釈しない");
-assert.match(interpretationPrompt, /絶対に数値を推測・補完・創作しない/, "数値創作を禁止");
+assert.match(interpretationPrompt, /数値の新規計算・推定・補完は禁止/, "数値創作を禁止");
 
 assert.equal(getEncoderPrompt("general"), GENERAL_ENCODER_PROMPT, "20. general prompt が存在する");
 assert.equal(getEncoderPrompt("seeker"), SEEKER_ENCODER_PROMPT, "21. seeker prompt が存在する");
@@ -88,8 +96,8 @@ for (const term of ["魂的個我", "非顕現の神", "顕現した神性"]) {
 assert.match(GENERAL_ENCODER_PROMPT, /"mode_profile": "general"/, "general prompt は mode_profile を出力する");
 assert.match(SEEKER_ENCODER_PROMPT, /"mode_profile": "seeker"/, "seeker prompt は mode_profile を出力する");
 assert.equal(encodingPrompt, SEEKER_ENCODER_PROMPT, "旧 encodingPrompt export は求道者版として互換維持");
-assert.match(interpretationPrompt, /mode_profile = general/, "解釈プロンプトは general profile を扱う");
-assert.match(interpretationPrompt, /component_meanings を優先/, "解釈は component_meanings を優先する");
+assert.match(interpretationPrompt, /gates_summary の meaning と component_meanings と life_question の語彙で語ってください/, "解釈は component_meanings を使う");
+assert.match(interpretationPrompt, /語りと構造のずれ/, "解釈プロンプトは予想と実測のずれを扱う");
 
 const generalMeasurement = runFullMeasurement(generalConfig);
 assert.equal(generalMeasurement.result.mode_profile, "general", "22. result に general mode_profile を引き継ぐ");
@@ -108,6 +116,117 @@ assert.equal(initialState("d")[3].re, 1, "単一初期状態を生成できる")
 
 assert.throws(() => validateConfig({ initial: "x", gates: [] }), /initial は a\/b\/c\/d/, "不正な initial を拒否");
 assert.throws(() => validateConfig({ initial: "a", gates: [] }), /gates が空/, "空の gates を拒否");
+
+// ===== 追加テスト: エンタングルメントと古典対照 =====
+
+// T-E1: Bell状態 (a→d, θ=π/4, φ=0) → (|00⟩+|11⟩)/√2
+const bellConfig = {
+  initial: "a", shots: undefined, seed: undefined,
+  gates: [{ name: "g_bell", source: "a", target: "d", theta: Math.PI / 4, phi: 0, strength: 2.5 }],
+};
+const bellState = applyGates(initialState("a"), bellConfig.gates);
+const bellEnt = analyzeEntanglement(bellState);
+assert.ok(Math.abs(bellEnt.concurrence - 1) < 1e-10, `E1a Bell concurrence=1: ${bellEnt.concurrence}`);
+assert.ok(Math.abs(bellEnt.purity.subject_axis - 0.5) < 1e-10, "E1b Bell purity=0.5");
+assert.ok(Math.abs(bellEnt.entanglement_entropy_bits - 1) < 1e-10, "E1c Bell entropy=1bit");
+assert.equal(bellEnt.entanglement_level, "NEAR_MAXIMAL", "E1d Bell level");
+assert.ok(Math.abs(bellEnt.bloch_z.subject_axis) < 1e-10, "E1e Bell bloch_z=0");
+
+// T-E2: 積状態 (a→b, θ=π/3, φ=0) → |0⟩⊗(cosθ|0⟩+sinθ|1⟩)
+const prodState = applyGates(initialState("a"),
+  [{ name: "g", source: "a", target: "b", theta: Math.PI / 3, phi: 0, strength: 3 }]);
+const prodEnt = analyzeEntanglement(prodState);
+assert.ok(prodEnt.concurrence < 1e-10, "E2a 積状態 concurrence=0");
+assert.ok(Math.abs(prodEnt.purity.subject_axis - 1) < 1e-10, "E2b 積状態 purity=1");
+assert.ok(Math.abs(prodEnt.entanglement_entropy_bits) < 1e-10, "E2c 積状態 entropy=0");
+assert.equal(prodEnt.entanglement_level, "SEPARABLE_LIKE", "E2d 積状態 level");
+assert.ok(Math.abs(prodEnt.bloch_z.subject_axis - 1) < 1e-10, "E2e 主体軸 z=+1");
+assert.ok(Math.abs(prodEnt.bloch_z.manifestation_axis - (-0.5)) < 1e-10, "E2f 顕現軸 z=-0.5");
+assert.ok(Math.abs(prodEnt.axis_populations.manifest - 0.75) < 1e-10, "E2g P(顕現)=0.75");
+
+// T-C1: 2段干渉 (a→b θ=π/4 を2回) — 量子は p_b=1、古典マルコフは p_b=0.5 → gap=1.0
+const interfConfig = {
+  initial: "a",
+  gates: [
+    { name: "g1", source: "a", target: "b", theta: Math.PI / 4, phi: 0, strength: 2.5 },
+    { name: "g2", source: "a", target: "b", theta: Math.PI / 4, phi: 0, strength: 2.5 },
+  ],
+};
+const interfProbs = probabilities(applyGates(initialState("a"), interfConfig.gates));
+assert.ok(Math.abs(interfProbs.b - 1) < 1e-10, "C1a 量子側 p_b=1");
+const interfControls = runClassicalControls(interfConfig, interfProbs);
+assert.ok(Math.abs(interfControls.interference_gap - 1.0) < 1e-10, `C1b interference_gap=1.0: ${interfControls.interference_gap}`);
+assert.equal(interfControls.interference_gap_level, "HIGH", "C1c gap level HIGH");
+assert.ok(Math.abs(interfControls.phase_dependence) < 1e-10, "C1d 全φ=0なので phase_dependence=0");
+
+// T-R1: seekerサンプル回帰(リファレンス実装によるゴールデン値、許容誤差1e-6)
+const seekerResult = runFullMeasurement(config);
+const se = seekerResult.result.entanglement;
+const sc = seekerResult.result.classical_controls;
+assert.ok(Math.abs(se.concurrence - 0.702497) < 1e-6, `R1a concurrence: ${se.concurrence}`);
+assert.ok(Math.abs(se.purity.subject_axis - 0.753249) < 1e-6, `R1b purity: ${se.purity.subject_axis}`);
+assert.ok(Math.abs(se.entanglement_entropy_bits - 0.595022) < 1e-6, `R1c entropy: ${se.entanglement_entropy_bits}`);
+assert.equal(se.entanglement_level, "STRONGLY_ENTANGLED", "R1d level");
+assert.ok(Math.abs(se.bloch_z.subject_axis - 0.640735) < 1e-6, `R1e bloch_z(subject): ${se.bloch_z.subject_axis}`);
+assert.ok(Math.abs(se.bloch_z.manifestation_axis - 0.454403) < 1e-6, `R1f bloch_z(manifest): ${se.bloch_z.manifestation_axis}`);
+assert.ok(Math.abs(sc.phase_dependence - 1.403718) < 1e-6, `R1g phase_dependence: ${sc.phase_dependence}`);
+assert.ok(Math.abs(sc.interference_gap - 0.811165) < 1e-6, `R1h interference_gap: ${sc.interference_gap}`);
+
+// T-R2: purity の両側一致(純粋状態の数学的性質)
+assert.ok(Math.abs(se.purity.subject_axis - se.purity.manifestation_axis) < 1e-10, "R2 purity両軸一致");
+
+// T-R3: gate_trace の concurrence_after が最終値と一致
+const lastTrace = seekerResult.audit.gate_trace.at(-1);
+assert.ok(Math.abs(lastTrace.concurrence_after - se.concurrence) < 1e-10, "R3 trace最終concurrenceが一致");
+
+// T-R4: ai_interpretation にフィールドが伝播している
+assert.equal(seekerResult.aiInterpretation.schema_version, "ai_interpretation_v3", "R4a schema v3");
+assert.ok(seekerResult.aiInterpretation.entanglement, "R4b entanglement伝播");
+assert.ok(seekerResult.aiInterpretation.classical_controls, "R4c controls伝播");
+
+// ===== v1.1 追補テスト =====
+
+// T-P1: phiLabel の判定
+assert.equal(phiLabel(0), "同位相(受容・同調)", "P1a");
+assert.equal(phiLabel(1.5707963268), "直交(葛藤・未統合)", "P1b");
+assert.equal(phiLabel(3.1415926536), "逆位相(反転・拒絶)", "P1c");
+assert.equal(phiLabel(-1.5707963268), "折返し(反転的気づき)", "P1d");
+assert.equal(phiLabel(0.8), "中間位相", "P1e");
+assert.equal(phiLabel(2 * Math.PI), "同位相(受容・同調)", "P1f 2πラップ");
+
+// T-P2: 意味情報の伝搬 (seekerサンプル、life_question追加後)
+const m = runFullMeasurement(config);
+assert.equal(m.result.gates_summary.length, config.gates.length, "P2a gates_summary件数");
+assert.ok(m.result.gates_summary[3].meaning.includes("光"), "P2b meaning伝搬");
+assert.equal(m.result.gates_summary[2].phi_label, "直交(葛藤・未統合)", "P2c phi_label");
+assert.ok(m.result.expected_reading_full.notes.length > 0, "P2d notes伝搬");
+assert.ok(m.result.expected_reading_full.pattern.includes("霊的進化"), "P2e pattern伝搬");
+assert.equal(m.result.life_question, "光を知った自分は、なぜ今この生活をしているのか", "P2f life_question伝搬");
+assert.ok(m.aiInterpretation.gates_summary, "P2g aiInterpretationへ伝搬");
+assert.ok(m.aiInterpretation.gate_resonance, "P2h gate_resonance伝搬");
+assert.equal(m.aiInterpretation.sections_present.gate_resonance, true, "P2i sections_present更新");
+
+// T-P3: 共鳴診断のゴールデンラベル (seekerサンプル、リファレンス実装で検証済み)
+// index 2 = G_bd_suffering_seeks_salvation: 即時0.452 / 反実仮想0.270 → ratio≈0.60 → WASHED_OUT
+// index 4 = G_cd_light_reveals_wisdom:      即時0.086 / 反実仮想0.305 → ratio≈3.55 → QUIET_SEED
+// index 5 = G_ab_return_to_embodied_life:   即時0.266 / 反実仮想0.862 → ratio≈3.24 → QUIET_SEED
+const gr = m.audit.gate_resonance;
+assert.equal(gr[2].resonance_label, "WASHED_OUT", `P3a: ${JSON.stringify(gr[2])}`);
+assert.equal(gr[4].resonance_label, "QUIET_SEED", `P3b: ${JSON.stringify(gr[4])}`);
+assert.equal(gr[5].resonance_label, "QUIET_SEED", `P3c: ${JSON.stringify(gr[5])}`);
+for (const entry of gr) {
+  if (entry.resonance_ratio !== null) {
+    assert.ok(Math.abs(entry.resonance_ratio - entry.counterfactual_weight / entry.immediate_effect) < 1e-12, "P3d ratio整合");
+  }
+}
+
+// T-P4: プレースホルダ保全(ui.jsのreplaceが壊れないこと)
+assert.ok(interpretationPrompt.includes("【ここにサイトの result JSON / audit JSON / AI解釈専用JSON を貼る】"), "P4 プレースホルダ存在");
+
+// T-P5: エンコーダプロンプトに新要件が入っていること
+assert.ok(SEEKER_ENCODER_PROMPT.includes("life_question"), "P5a seeker");
+assert.ok(GENERAL_ENCODER_PROMPT.includes("life_question"), "P5b general");
+assert.ok(SEEKER_ENCODER_PROMPT.includes("同じ strength を付けないでください"), "P5c strength要件");
 
 console.log("All tests passed.");
 console.log(JSON.stringify({

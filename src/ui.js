@@ -124,6 +124,30 @@ function renderResults(measurement) {
   ]));
   output.append(basic, distributionCard(result));
 
+  const entanglement = result.entanglement;
+  const entanglementCard = card("二軸構造とエンタングルメント");
+  entanglementCard.append(
+    simpleTable(["指標", "値"], [
+      ["Concurrence (絡み合い度)", `${formatNumber(entanglement.concurrence)} (${entanglement.entanglement_level})`],
+      ["エンタングルメントエントロピー", `${formatNumber(entanglement.entanglement_entropy_bits)} bit`],
+      ["Purity (主体軸)", formatNumber(entanglement.purity.subject_axis)],
+      ["主体軸バランス (個我 ↔ 超越)", `個我 ${formatNumber(entanglement.axis_populations.individual)} / 超越 ${formatNumber(entanglement.axis_populations.transcendent)}`],
+      ["顕現軸バランス (非顕現 ↔ 顕現)", `非顕現 ${formatNumber(entanglement.axis_populations.unmanifest)} / 顕現 ${formatNumber(entanglement.axis_populations.manifest)}`],
+    ]),
+    element("p", "data-source-note", "Concurrence は『主体軸(個我/超越)の問い』と『顕現軸(非顕現/顕現)の問い』がどれだけ不可分に絡み合っているかを示します。0 = 二つの問いは独立、1 = 最大の絡み合い。"),
+  );
+
+  const controls = result.classical_controls;
+  const controlsCard = card("古典対照(この回路に量子構造は必要だったか)");
+  controlsCard.append(
+    simpleTable(["対照", "L1距離", "判定"], [
+      ["位相キル (全φ=0)", formatNumber(controls.phase_dependence), controls.phase_dependence_level],
+      ["古典マルコフ (干渉なし)", formatNumber(controls.interference_gap), controls.interference_gap_level],
+    ]),
+    element("p", "data-source-note", "両方が LOW の場合、この config の結果は古典的な確率遷移でほぼ再現でき、位相・干渉は結果に寄与していません。"),
+  );
+  output.append(entanglementCard, controlsCard);
+
   const counts = card("C. サンプリング結果 / sampled counts");
   counts.append(
     element("p", "data-source-note", "sampled_counts = shots と seed による疑似サンプリング結果 / sampled_probabilities = sampled_counts ÷ shots"),
